@@ -16,6 +16,23 @@ Expected total time on first run: ~3 minutes (mostly the backend image build dow
   cd Standard-RAG
   ```
 
+### Windows (PowerShell)
+
+```powershell
+docker --version
+docker compose version
+
+# If `docker info` fails, Docker Desktop isn't running. Start it and wait for the daemon:
+if (-not (docker info --format '{{.ServerVersion}}' 2>$null)) {
+    Start-Process "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"
+    Write-Host "Waiting for Docker daemon..."
+    while (-not (docker info --format '{{.ServerVersion}}' 2>$null)) { Start-Sleep -Seconds 2 }
+}
+
+git clone https://github.com/Wkayaobama/Standard-RAG.git
+Set-Location Standard-RAG
+```
+
 No Python, Node, or any SDK installed on the host — everything runs inside the two Docker containers.
 
 ---
@@ -32,6 +49,7 @@ cp .env.example .env
 **Windows (PowerShell):**
 ```powershell
 Copy-Item .env.example .env
+notepad .env   # paste your real ANTHROPIC_API_KEY, save, close
 ```
 
 Open `.env` in any editor and set:
@@ -69,6 +87,17 @@ docker compose up --build -d
 ```
 and view logs later with `docker compose logs -f`.
 
+### Windows (PowerShell)
+
+```powershell
+# Foreground (Ctrl+C to stop):
+docker compose up --build
+
+# Or background + follow logs in the same shell:
+docker compose up --build -d
+docker compose logs -f
+```
+
 ---
 
 ## Step 3 — Verify the backend is live
@@ -86,6 +115,16 @@ Expected response:
 
 If this fails, see **Troubleshooting** below before proceeding.
 
+### Windows (PowerShell)
+
+```powershell
+Invoke-RestMethod http://localhost:8000/api/health
+# Expected: @{ status = 'ok'; project = 'standard-rag' }
+
+# Open the OpenAPI docs in the default browser:
+Start-Process http://localhost:8000/api/docs
+```
+
 The OpenAPI docs are at http://localhost:8000/api/docs — useful for driving the backend without the UI.
 
 ---
@@ -98,6 +137,24 @@ Open http://localhost:5173 in your browser. You'll see three sections appear pro
 2. After upload, a **PDFs** card lists each file with a live status badge: `pending` → `running` → `done` (or `error`). The list polls `GET /api/pdfs` every 1.5 s, so you'll see the states change without refresh.
 3. Each PDF converts in parallel on the backend via `asyncio.gather` over per-file coroutines; a 30-page PDF typically completes in 2–5 seconds.
 4. When a file reaches `done`, a `.md` download button appears next to it — click to see the individual converted markdown.
+
+### Windows (PowerShell)
+
+```powershell
+# Open the UI:
+Start-Process http://localhost:5173
+
+# Or upload entirely from the shell (one or many PDFs, comma-separated):
+$form = @{ files = Get-Item C:\path\to\deck1.pdf, C:\path\to\deck2.pdf }
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/pdfs -Form $form
+# -> @{ job_id = '...'; pdf_ids = @('...','...') }
+
+# Poll one job:
+Invoke-RestMethod http://localhost:8000/api/jobs/<job_id_from_above>
+
+# Or list every PDF the backend knows about:
+Invoke-RestMethod http://localhost:8000/api/pdfs
+```
 
 ---
 
@@ -113,6 +170,17 @@ This calls `POST /api/corpus/build`, which concatenates every converted PDF into
 When build completes, a **Download** button appears. The file is served at `GET /api/corpus` as `text/markdown`.
 
 Building is idempotent — click again later after adding more PDFs; it overwrites with the current set.
+
+### Windows (PowerShell)
+
+```powershell
+# Build corpus.md server-side:
+Invoke-RestMethod -Method Post http://localhost:8000/api/corpus/build
+# -> @{ path = '/app/data/corpus.md'; bytes = ...; pdfs = ... }
+
+# Download it to the current directory:
+Invoke-WebRequest http://localhost:8000/api/corpus -OutFile .\corpus.md
+```
 
 ---
 
@@ -131,6 +199,24 @@ The UI shows citations as small badges under each assistant message so you can s
 
 Conversation history lives in the browser and is sent back with each turn — the backend is stateless per request.
 
+### Windows (PowerShell)
+
+```powershell
+$body = @{
+    question = 'What are the three main sections in the first PDF?'
+    history  = @()
+    top_k    = 6
+} | ConvertTo-Json
+
+$resp = Invoke-RestMethod -Method Post `
+    -Uri http://localhost:8000/api/chat `
+    -ContentType 'application/json' `
+    -Body $body
+
+$resp.answer
+$resp.citations | Format-Table pdf_id, section_path
+```
+
 ---
 
 ## Step 7 — Stopping the app
@@ -148,6 +234,16 @@ docker compose down -v
 ```
 
 The `-v` flag drops the `rag-data` and `frontend-node-modules` volumes. All uploaded PDFs and chat context are gone.
+
+### Windows (PowerShell)
+
+```powershell
+# Stop containers, keep volumes:
+docker compose down
+
+# Stop + wipe all persisted PDFs/markdown/SQLite (rag-data and frontend-node-modules):
+docker compose down -v
+```
 
 ---
 
